@@ -19,5 +19,5 @@ plotly>=5.18.0
 # Utils
 requests>=2.31.0
 
-# Testing
+# Testing (optional in production)
 pytest>=7.4.0

@@ -19,8 +19,10 @@ ENV/
 *.swo
 
 # Data
+data/delvalue.db
+data/test*.db
 data/uploads/*
-data/synthetic/*
+!data/uploads/.gitkeep
 
 # Logs
 *.log
@@ -29,3 +31,11 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Streamlit
+.streamlit/secrets.toml
