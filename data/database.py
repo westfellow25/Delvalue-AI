@@ -30,6 +30,9 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 def init_db() -> None:
     """Create all tables. Use Alembic migrations in production."""
+    # Import all models so Base.metadata knows about them
+    import data.models.organization  # noqa: F401
+    import data.models.process  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 
