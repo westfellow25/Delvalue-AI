@@ -23,6 +23,7 @@ data/delvalue.db
 data/test*.db
 data/uploads/*
 !data/uploads/.gitkeep
+data/ml_models/*.joblib
 
 # Logs
 *.log
