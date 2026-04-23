@@ -1,0 +1,19 @@
+{
+  "name": "DelValue AI",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "forwardPorts": [8000, 8501],
+  "portsAttributes": {
+    "8000": {"label": "API", "onAutoForward": "openBrowser"},
+    "8501": {"label": "UI", "onAutoForward": "notify"}
+  },
+  "postCreateCommand": "pip install -r requirements.txt && python -c 'from data.database import init_db; init_db()'",
+  "postStartCommand": "uvicorn api.main:app --host 0.0.0.0 --port 8000 &",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "ms-python.debugpy"],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
+      }
+    }
+  }
+}
