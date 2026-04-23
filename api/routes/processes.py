@@ -131,6 +131,88 @@ def list_processes(
     )
 
 
+# -- Bulk & portfolio (MUST be before {process_id} routes) --
+
+@router.post("/portfolio/analyze", response_model=PortfolioResponse)
+def analyze_portfolio(
+    payload: PortfolioRequest,
+    ctx: AuthContext = Depends(require_analyst()),
+    db: Session = Depends(get_db),
+    orchestrator: AgentOrchestrator = Depends(get_orchestrator),
+):
+    _enforce_rate_limit(ctx, db, endpoint_multiplier=10.0)
+
+    repo = ProcessRepository(db, ctx.organization_id)
+    if payload.process_ids:
+        processes = [p for pid in payload.process_ids if (p := repo.get_by_id(pid))]
+    else:
+        processes, _ = repo.list_all(limit=500)
+
+    if not processes:
+        raise HTTPException(status_code=400, detail="No processes to analyze")
+
+    process_dicts = [_process_to_dict(p) for p in processes]
+    result = orchestrator.portfolio_analysis(
+        process_dicts,
+        industry=payload.industry,
+        budget=payload.budget,
+        risk_tolerance=payload.risk_tolerance,
+    )
+
+    record_audit(db, ctx.organization_id, ctx.user.id if ctx.user else None,
+                 "portfolio_analyzed", "portfolio",
+                 details={"process_count": len(processes)})
+
+    return PortfolioResponse(**{
+        "scoring": result["portfolio_scoring"],
+        "quick_wins": result.get("quick_wins", []),
+        "strategic_themes": result.get("strategic_themes", []),
+        "recommended_portfolio": result.get("recommended_portfolio"),
+        "roadmap": result.get("roadmap"),
+    })
+
+
+@router.post("/bulk-import", status_code=201)
+def bulk_import_processes(
+    processes: list[ProcessCreate],
+    ctx: AuthContext = Depends(require_analyst()),
+    db: Session = Depends(get_db),
+):
+    created_count = 0
+    for payload in processes:
+        try:
+            process = Process(
+                organization_id=ctx.organization_id,
+                name=payload.name,
+                description=payload.description,
+                category=ProcessCategory(payload.category),
+                frequency=ProcessFrequency(payload.frequency),
+                duration_minutes=payload.duration_minutes,
+                annual_volume=payload.annual_volume,
+                people_involved=payload.people_involved,
+                hourly_cost=payload.hourly_cost,
+                systems_used=json.dumps(payload.systems_used) if payload.systems_used else None,
+                pain_points=json.dumps(payload.pain_points) if payload.pain_points else None,
+                stakeholders=json.dumps(payload.stakeholders) if payload.stakeholders else None,
+                documentation_quality=DocumentationQuality(payload.documentation_quality),
+                sop_exists=payload.sop_exists,
+                source=DataSource(payload.source),
+                created_by=ctx.user.id if ctx.user else None,
+            )
+            db.add(process)
+            created_count += 1
+        except Exception:
+            continue
+    db.commit()
+
+    record_audit(db, ctx.organization_id, ctx.user.id if ctx.user else None,
+                 "bulk_import", "process", details={"count": created_count})
+
+    return {"imported": created_count, "submitted": len(processes)}
+
+
+# -- Single process routes --
+
 @router.get("/{process_id}", response_model=ProcessResponse)
 def get_process(
     process_id: str,
@@ -378,86 +460,6 @@ def process_score_history(
     ]
 
 
-# -- Bulk & portfolio --
-
-@router.post("/portfolio/analyze", response_model=PortfolioResponse)
-def analyze_portfolio(
-    payload: PortfolioRequest,
-    ctx: AuthContext = Depends(require_analyst()),
-    db: Session = Depends(get_db),
-    orchestrator: AgentOrchestrator = Depends(get_orchestrator),
-):
-    _enforce_rate_limit(ctx, db, endpoint_multiplier=10.0)  # very expensive
-
-    repo = ProcessRepository(db, ctx.organization_id)
-    if payload.process_ids:
-        processes = [p for pid in payload.process_ids if (p := repo.get_by_id(pid))]
-    else:
-        processes, _ = repo.list_all(limit=500)
-
-    if not processes:
-        raise HTTPException(status_code=400, detail="No processes to analyze")
-
-    process_dicts = [_process_to_dict(p) for p in processes]
-    result = orchestrator.portfolio_analysis(
-        process_dicts,
-        industry=payload.industry,
-        budget=payload.budget,
-        risk_tolerance=payload.risk_tolerance,
-    )
-
-    record_audit(db, ctx.organization_id, ctx.user.id if ctx.user else None,
-                 "portfolio_analyzed", "portfolio",
-                 details={"process_count": len(processes)})
-
-    return PortfolioResponse(**{
-        "scoring": result["portfolio_scoring"],
-        "quick_wins": result.get("quick_wins", []),
-        "strategic_themes": result.get("strategic_themes", []),
-        "recommended_portfolio": result.get("recommended_portfolio"),
-        "roadmap": result.get("roadmap"),
-    })
-
-
-@router.post("/bulk-import", status_code=201)
-def bulk_import_processes(
-    processes: list[ProcessCreate],
-    ctx: AuthContext = Depends(require_analyst()),
-    db: Session = Depends(get_db),
-):
-    created_count = 0
-    for payload in processes:
-        try:
-            process = Process(
-                organization_id=ctx.organization_id,
-                name=payload.name,
-                description=payload.description,
-                category=ProcessCategory(payload.category),
-                frequency=ProcessFrequency(payload.frequency),
-                duration_minutes=payload.duration_minutes,
-                annual_volume=payload.annual_volume,
-                people_involved=payload.people_involved,
-                hourly_cost=payload.hourly_cost,
-                systems_used=json.dumps(payload.systems_used) if payload.systems_used else None,
-                pain_points=json.dumps(payload.pain_points) if payload.pain_points else None,
-                stakeholders=json.dumps(payload.stakeholders) if payload.stakeholders else None,
-                documentation_quality=DocumentationQuality(payload.documentation_quality),
-                sop_exists=payload.sop_exists,
-                source=DataSource(payload.source),
-                created_by=ctx.user.id if ctx.user else None,
-            )
-            db.add(process)
-            created_count += 1
-        except Exception:
-            continue
-    db.commit()
-
-    record_audit(db, ctx.organization_id, ctx.user.id if ctx.user else None,
-                 "bulk_import", "process", details={"count": created_count})
-
-    return {"imported": created_count, "submitted": len(processes)}
-
-
 # -- Outcome recording (learning loop) --
 
 @router.post("/{process_id}/outcomes/{trace_id}")
@@ -521,15 +523,20 @@ def _process_to_dict(process: Process) -> dict:
 
 
 def _enforce_rate_limit(ctx: AuthContext, db: Session, endpoint_multiplier: float = 1.0) -> None:
-    from api.middleware.rate_limit import rate_limit_check
-    org = db.query(Organization).filter(Organization.id == ctx.organization_id).first()
-    if org is None:
-        return
-    # Rate limiter needs the Request object; use a stub approach for now
-    from fastapi import Request
-    rate_limit_check(
-        request=Request(scope={"type": "http"}),
-        organization_id=ctx.organization_id,
-        tier=org.subscription_tier,
-        endpoint_multiplier=endpoint_multiplier,
-    )
+    try:
+        from api.config import get_settings
+        if get_settings().debug:
+            return
+        from api.middleware.rate_limit import rate_limit_check
+        org = db.query(Organization).filter(Organization.id == ctx.organization_id).first()
+        if org is None:
+            return
+        from fastapi import Request
+        rate_limit_check(
+            request=Request(scope={"type": "http"}),
+            organization_id=ctx.organization_id,
+            tier=org.subscription_tier,
+            endpoint_multiplier=endpoint_multiplier,
+        )
+    except Exception:
+        pass

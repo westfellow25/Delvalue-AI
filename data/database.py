@@ -28,12 +28,19 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
-def init_db() -> None:
-    """Create all tables. Use Alembic migrations in production."""
-    # Import all models so Base.metadata knows about them
+def init_db(seed: bool = True) -> None:
+    """Create all tables and optionally seed benchmark data."""
     import data.models.organization  # noqa: F401
     import data.models.process  # noqa: F401
     Base.metadata.create_all(bind=engine)
+
+    if seed:
+        try:
+            from data.seeds.benchmarks import seed_benchmarks
+            with Session(engine) as db:
+                seed_benchmarks(db)
+        except Exception:
+            pass
 
 
 def get_db() -> Generator[Session, None, None]:
