@@ -55,6 +55,7 @@ with st.sidebar:
     page = st.radio(
         "Go to",
         [
+            "About",
             "Dashboard",
             "Process Library",
             "Analyze Process",
@@ -69,12 +70,15 @@ with st.sidebar:
     )
 
     st.divider()
-    st.caption(f"v2.0 | Model: heuristic-v2")
-    st.caption("© 2024 DelValue AI")
+    st.caption("v2.0 | ML Scoring + Monte Carlo")
+    st.caption("© 2025 DelValue AI")
 
 
 # -- Page routing --
-if page == "Dashboard":
+if page == "About":
+    from ui.pages.about import render
+    render()
+elif page == "Dashboard":
     from ui.pages.dashboard import render
     render()
 elif page == "Process Library":
